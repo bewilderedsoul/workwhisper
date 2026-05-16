@@ -4,6 +4,7 @@ import { z } from "zod";
 import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/prisma/client";
 import { generateUsername } from "@/lib/auth/utils";
+import { enforceRateLimit } from "@/lib/rate-limit";
 
 export const dynamic = "force-dynamic";
 
@@ -26,6 +27,10 @@ async function generateUniqueUsername(): Promise<string> {
 }
 
 export async function POST(req: NextRequest) {
+  // 3 signups per IP per hour
+  const rl = enforceRateLimit(req, { key: "signup", limit: 3, windowMs: 60 * 60 * 1000 });
+  if (rl) return rl;
+
   let body: unknown;
   try {
     body = await req.json();

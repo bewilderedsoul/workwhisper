@@ -25,7 +25,28 @@ const Schema = z.object({
 });
 
 export async function POST(req: NextRequest) {
+  // Require login — no anonymous dumps. The post itself stays anonymous
+  // because we expose only the user's auto-generated username.
   const session = await getServerSession(authOptions);
+  const userId = session?.user?.id;
+  if (!userId) {
+    return NextResponse.json({ error: "Please sign in to submit a salary." }, { status: 401 });
+  }
+
+  // Per-user rate limit: 10 submissions per hour.
+  const recent = await prisma.post.count({
+    where: {
+      userId,
+      type: "SALARY",
+      createdAt: { gt: new Date(Date.now() - 60 * 60 * 1000) },
+    },
+  });
+  if (recent >= 10) {
+    return NextResponse.json(
+      { error: "Limit reached: 10 salary submissions per hour. Try again later." },
+      { status: 429 },
+    );
+  }
 
   let body: unknown;
   try {
@@ -41,7 +62,6 @@ export async function POST(req: NextRequest) {
   const data = parsed.data;
   const totalComp = Math.round(data.baseSalary + data.bonus + data.stock);
 
-  // Pick or create a default bowl for anonymous salary contributions
   const bowl = await prisma.bowl.upsert({
     where: { slug: "salary-discussions" },
     update: {},
@@ -53,17 +73,6 @@ export async function POST(req: NextRequest) {
       isDefault: true,
     },
   });
-
-  // Anonymous user fallback
-  let userId = session?.user?.id as string | undefined;
-  if (!userId) {
-    const anon = await prisma.user.upsert({
-      where: { username: "AnonymousContributor" },
-      update: {},
-      create: { username: "AnonymousContributor" },
-    });
-    userId = anon.id;
-  }
 
   const post = await prisma.post.create({
     data: {

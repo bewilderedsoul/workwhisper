@@ -26,6 +26,7 @@ model User {
   sessions     Session[]
   otpTokens    OtpToken[]
   memberships  BowlMembership[]
+  reports      Report[]
 
   @@map("users")
 }
@@ -91,6 +92,7 @@ model Post {
   bowlId      String
   score       Int         @default(0)
   viewCount   Int         @default(0)
+  reportCount Int         @default(0)
   isFlagged   Boolean     @default(false)
   flagReason  String?
   isDeleted   Boolean     @default(false)
@@ -123,8 +125,25 @@ model Post {
   bowl        Bowl        @relation(fields: [bowlId], references: [id], onDelete: Cascade)
   comments    Comment[]
   votes       Vote[]
+  reports     Report[]
 
   @@map("posts")
+}
+
+model Report {
+  id        String   @id @default(cuid())
+  postId    String
+  userId    String
+  reason    String
+  detail    String?
+  createdAt DateTime @default(now())
+
+  post      Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([postId, userId])
+  @@index([postId])
+  @@map("reports")
 }
 
 model Comment {

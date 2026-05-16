@@ -2,6 +2,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma/client";
 import { generateOTP, hashToken, sendOTPEmail } from "@/lib/auth/utils";
+import { enforceRateLimit } from "@/lib/rate-limit";
 import { z } from "zod";
 
 const schema = z.object({
@@ -9,6 +10,10 @@ const schema = z.object({
 });
 
 export async function POST(req: NextRequest) {
+  // 5 OTP requests per IP per hour — stops attackers rotating emails to burn SMTP quota.
+  const rl = enforceRateLimit(req, { key: "otp-send", limit: 5, windowMs: 60 * 60 * 1000 });
+  if (rl) return rl;
+
   try {
     const body = await req.json();
     const { identifier } = schema.parse(body);
