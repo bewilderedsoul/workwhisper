@@ -4,10 +4,11 @@
 import { useState, useEffect } from "react";
 import { signIn, useSession } from "next-auth/react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Mail, ArrowRight, RefreshCw, ChevronLeft, ShieldCheck } from "lucide-react";
+import { Mail, ArrowRight, RefreshCw, ChevronLeft, ShieldCheck, Lock, Eye, EyeOff } from "lucide-react";
 import { cn, validateEmail } from "@/lib/utils";
 
-type Step = "identifier" | "otp";
+type Mode = "signin" | "signup";
+type OtpStep = "identifier" | "otp";
 
 export default function LoginPage() {
   const { data: session } = useSession();
@@ -17,16 +18,22 @@ export default function LoginPage() {
   const callbackUrl =
     rawCallback.startsWith("/") && !rawCallback.startsWith("//") ? rawCallback : "/feed";
 
-  const [step, setStep] = useState<Step>("identifier");
-  const [identifier, setIdentifier] = useState("");
-  const [otp, setOtp] = useState(["", "", "", "", "", ""]);
+  const [mode, setMode] = useState<Mode>("signin");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [info, setInfo] = useState("");
+
+  const [useOtpFlow, setUseOtpFlow] = useState(false);
+  const [otpStep, setOtpStep] = useState<OtpStep>("identifier");
+  const [otp, setOtp] = useState(["", "", "", "", "", ""]);
   const [resendCooldown, setResendCooldown] = useState(0);
 
   useEffect(() => {
     if (session) router.replace(callbackUrl);
-  }, [session]);
+  }, [session, callbackUrl, router]);
 
   useEffect(() => {
     if (resendCooldown > 0) {
@@ -35,25 +42,73 @@ export default function LoginPage() {
     }
   }, [resendCooldown]);
 
-  const handleSendOTP = async (e: React.FormEvent) => {
+  // ----------- Google sign-in -----------
+  const handleGoogle = () => {
+    setError("");
+    setLoading(true);
+    signIn("google", { callbackUrl });
+  };
+
+  // ----------- Email + password -----------
+  const handlePasswordSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
+    setInfo("");
 
-    if (!validateEmail(identifier.trim())) {
-      setError("Please enter a valid email address");
+    const cleanEmail = email.trim().toLowerCase();
+    if (!validateEmail(cleanEmail)) {
+      setError("Enter a valid email address");
+      return;
+    }
+    if (password.length < 8) {
+      setError("Password must be at least 8 characters");
       return;
     }
 
     setLoading(true);
     try {
+      if (mode === "signup") {
+        const res = await fetch("/api/auth/signup", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email: cleanEmail, password }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "Sign-up failed");
+      }
+      const result = await signIn("password", {
+        email: cleanEmail,
+        password,
+        redirect: false,
+      });
+      if (result?.error) throw new Error("Wrong email or password");
+      router.replace(callbackUrl);
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ----------- OTP fallback flow -----------
+  const handleSendOTP = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError("");
+    const cleanEmail = email.trim().toLowerCase();
+    if (!validateEmail(cleanEmail)) {
+      setError("Enter a valid email address");
+      return;
+    }
+    setLoading(true);
+    try {
       const res = await fetch("/api/auth/otp/send", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ identifier: identifier.trim().toLowerCase() }),
+        body: JSON.stringify({ identifier: cleanEmail }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed to send OTP");
-      setStep("otp");
+      if (!res.ok) throw new Error(data.error || "Failed to send code");
+      setOtpStep("otp");
       setResendCooldown(60);
     } catch (err: any) {
       setError(err.message);
@@ -64,7 +119,6 @@ export default function LoginPage() {
 
   const handleOTPInput = (index: number, value: string) => {
     if (value.length > 1) {
-      // Handle paste
       const digits = value.replace(/\D/g, "").slice(0, 6);
       const newOtp = [...otp];
       digits.split("").forEach((d, i) => { if (i < 6) newOtp[i] = d; });
@@ -74,14 +128,10 @@ export default function LoginPage() {
       document.getElementById(`otp-${focusIndex}`)?.focus();
       return;
     }
-
     const newOtp = [...otp];
     newOtp[index] = value.replace(/\D/g, "");
     setOtp(newOtp);
-
-    if (value && index < 5) {
-      document.getElementById(`otp-${index + 1}`)?.focus();
-    }
+    if (value && index < 5) document.getElementById(`otp-${index + 1}`)?.focus();
   };
 
   const handleOTPKeyDown = (index: number, e: React.KeyboardEvent) => {
@@ -94,17 +144,15 @@ export default function LoginPage() {
     e.preventDefault();
     setError("");
     const code = otp.join("");
-    if (code.length < 6) { setError("Please enter the full 6-digit code"); return; }
-
+    if (code.length < 6) { setError("Enter the full 6-digit code"); return; }
     setLoading(true);
     try {
-      const result = await signIn("credentials", {
-        identifier: identifier.trim().toLowerCase(),
+      const result = await signIn("otp", {
+        identifier: email.trim().toLowerCase(),
         otp: code,
         redirect: false,
       });
-
-      if (result?.error) throw new Error("Invalid or expired code. Please try again.");
+      if (result?.error) throw new Error("Invalid or expired code");
       router.replace(callbackUrl);
     } catch (err: any) {
       setError(err.message);
@@ -115,181 +163,298 @@ export default function LoginPage() {
     }
   };
 
-  const handleResend = async () => {
-    if (resendCooldown > 0) return;
+  const resetOtpFlow = () => {
+    setUseOtpFlow(false);
+    setOtpStep("identifier");
+    setOtp(["", "", "", "", "", ""]);
     setError("");
-    setLoading(true);
-    try {
-      const res = await fetch("/api/auth/otp/send", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ identifier: identifier.trim().toLowerCase() }),
-      });
-      if (!res.ok) throw new Error("Failed to resend");
-      setResendCooldown(60);
-      setOtp(["", "", "", "", "", ""]);
-    } catch (err: any) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
   };
 
+  // ----------- Render -----------
   return (
     <div className="min-h-screen bg-background flex flex-col items-center justify-center p-4">
-      {/* Background decoration */}
       <div className="fixed inset-0 overflow-hidden pointer-events-none">
         <div className="absolute top-1/4 left-1/2 -translate-x-1/2 w-[600px] h-[600px] bg-whisper-500/5 rounded-full blur-3xl" />
         <div className="absolute bottom-1/4 right-1/4 w-[400px] h-[400px] bg-saffron-500/5 rounded-full blur-3xl" />
       </div>
 
       <div className="relative w-full max-w-sm">
-        {/* Logo */}
         <div className="text-center mb-8">
           <div className="text-5xl mb-3">🤫</div>
           <h1 className="font-display font-bold text-2xl gradient-text">WorkWhisper</h1>
           <p className="text-sm text-muted-foreground mt-1">
-            India's anonymous professional community
+            Anonymous workplace insights, worldwide
           </p>
         </div>
 
-        {/* Card */}
         <div className="whisper-card p-6">
-          {step === "identifier" ? (
-            <>
-              <div className="mb-5">
-                <h2 className="font-display font-semibold text-lg">Sign in</h2>
-                <p className="text-sm text-muted-foreground mt-0.5">
-                  We'll send a one-time code to your email
+          {useOtpFlow ? (
+            // ----- OTP flow -----
+            otpStep === "identifier" ? (
+              <>
+                <button
+                  onClick={resetOtpFlow}
+                  className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors mb-4"
+                >
+                  <ChevronLeft className="w-4 h-4" /> Back
+                </button>
+                <h2 className="font-display font-semibold text-lg mb-1">Sign in with email code</h2>
+                <p className="text-sm text-muted-foreground mb-5">
+                  We&apos;ll email you a 6-digit code
                 </p>
+                <form onSubmit={handleSendOTP} className="space-y-4">
+                  <Input
+                    icon={<Mail className="w-4 h-4" />}
+                    type="email"
+                    value={email}
+                    onChange={(v) => setEmail(v)}
+                    placeholder="you@example.com"
+                    autoComplete="email"
+                  />
+                  {error && <ErrorBox>{error}</ErrorBox>}
+                  <PrimaryButton loading={loading} disabled={!email}>
+                    Send code <ArrowRight className="w-4 h-4" />
+                  </PrimaryButton>
+                </form>
+              </>
+            ) : (
+              <>
+                <button
+                  onClick={() => { setOtpStep("identifier"); setOtp(["", "", "", "", "", ""]); setError(""); }}
+                  className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors mb-4"
+                >
+                  <ChevronLeft className="w-4 h-4" /> Back
+                </button>
+                <h2 className="font-display font-semibold text-lg mb-1">Check your email</h2>
+                <p className="text-sm text-muted-foreground mb-5">
+                  We sent a 6-digit code to <span className="font-medium text-foreground">{email}</span>
+                </p>
+                <form onSubmit={handleVerifyOTP} className="space-y-4">
+                  <div className="flex gap-2 justify-center">
+                    {otp.map((digit, i) => (
+                      <input
+                        key={i}
+                        id={`otp-${i}`}
+                        type="text"
+                        inputMode="numeric"
+                        value={digit}
+                        onChange={(e) => handleOTPInput(i, e.target.value)}
+                        onKeyDown={(e) => handleOTPKeyDown(i, e)}
+                        onPaste={(e) => { e.preventDefault(); handleOTPInput(i, e.clipboardData.getData("text")); }}
+                        maxLength={6}
+                        className={cn(
+                          "w-11 h-12 text-center text-lg font-bold rounded-lg border bg-muted",
+                          "focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent transition-all",
+                          digit ? "border-whisper-500/50 bg-whisper-500/5" : "border-border"
+                        )}
+                        autoFocus={i === 0}
+                      />
+                    ))}
+                  </div>
+                  {error && <ErrorBox>{error}</ErrorBox>}
+                  <PrimaryButton loading={loading} disabled={otp.join("").length < 6}>
+                    Verify & sign in
+                  </PrimaryButton>
+                </form>
+                <div className="mt-4 text-center">
+                  <button
+                    onClick={async () => {
+                      if (resendCooldown > 0) return;
+                      setError("");
+                      setLoading(true);
+                      try {
+                        await fetch("/api/auth/otp/send", {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ identifier: email.trim().toLowerCase() }),
+                        });
+                        setResendCooldown(60);
+                        setOtp(["", "", "", "", "", ""]);
+                      } finally { setLoading(false); }
+                    }}
+                    disabled={resendCooldown > 0 || loading}
+                    className="text-xs text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
+                  >
+                    {resendCooldown > 0 ? `Resend in ${resendCooldown}s` : "Didn't receive it? Resend code"}
+                  </button>
+                </div>
+              </>
+            )
+          ) : (
+            // ----- Main flow: Google + password -----
+            <>
+              <div className="flex bg-muted rounded-lg p-1 mb-5 text-sm">
+                <button
+                  type="button"
+                  onClick={() => { setMode("signin"); setError(""); setInfo(""); }}
+                  className={cn(
+                    "flex-1 py-1.5 rounded-md font-medium transition",
+                    mode === "signin" ? "bg-background shadow-sm" : "text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  Sign in
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setMode("signup"); setError(""); setInfo(""); }}
+                  className={cn(
+                    "flex-1 py-1.5 rounded-md font-medium transition",
+                    mode === "signup" ? "bg-background shadow-sm" : "text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  Create account
+                </button>
               </div>
 
-              <form onSubmit={handleSendOTP} className="space-y-4">
-                <div>
-                  <label className="block text-xs font-medium text-muted-foreground mb-1.5">
-                    Email address
-                  </label>
-                  <div className="relative">
-                    <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                    <input
-                      type="email"
-                      value={identifier}
-                      onChange={(e) => setIdentifier(e.target.value)}
-                      placeholder="you@example.com"
-                      autoComplete="email"
-                      autoFocus
-                      required
-                      className="w-full pl-9 pr-4 py-2.5 text-sm bg-muted border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent"
-                    />
-                  </div>
-                </div>
+              <button
+                onClick={handleGoogle}
+                disabled={loading}
+                className="w-full flex items-center justify-center gap-2.5 py-2.5 rounded-lg font-medium text-sm bg-background border border-border hover:bg-muted transition-colors disabled:opacity-50"
+              >
+                <GoogleIcon />
+                Continue with Google
+              </button>
 
-                {error && (
-                  <div className="text-xs text-destructive bg-destructive/10 border border-destructive/20 rounded-lg px-3 py-2">
-                    {error}
+              <div className="flex items-center gap-3 my-5">
+                <div className="flex-1 h-px bg-border" />
+                <span className="text-[11px] uppercase tracking-wider text-muted-foreground">or</span>
+                <div className="flex-1 h-px bg-border" />
+              </div>
+
+              <form onSubmit={handlePasswordSubmit} className="space-y-3">
+                <Input
+                  icon={<Mail className="w-4 h-4" />}
+                  type="email"
+                  value={email}
+                  onChange={setEmail}
+                  placeholder="you@example.com"
+                  autoComplete="email"
+                />
+                <Input
+                  icon={<Lock className="w-4 h-4" />}
+                  type={showPassword ? "text" : "password"}
+                  value={password}
+                  onChange={setPassword}
+                  placeholder={mode === "signup" ? "At least 8 characters" : "Your password"}
+                  autoComplete={mode === "signup" ? "new-password" : "current-password"}
+                  rightAdornment={
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword((v) => !v)}
+                      className="text-muted-foreground hover:text-foreground"
+                      aria-label={showPassword ? "Hide password" : "Show password"}
+                    >
+                      {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  }
+                />
+                {error && <ErrorBox>{error}</ErrorBox>}
+                {info && (
+                  <div className="text-xs text-green-600 bg-green-500/10 border border-green-500/20 rounded-lg px-3 py-2">
+                    {info}
                   </div>
                 )}
-
-                <button
-                  type="submit"
-                  disabled={loading || !identifier}
-                  className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg font-semibold text-sm bg-whisper-500 hover:bg-whisper-600 text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  {loading ? (
-                    <RefreshCw className="w-4 h-4 animate-spin" />
-                  ) : (
-                    <>Continue <ArrowRight className="w-4 h-4" /></>
-                  )}
-                </button>
+                <PrimaryButton loading={loading} disabled={!email || password.length < 8}>
+                  {mode === "signup" ? "Create account" : "Sign in"} <ArrowRight className="w-4 h-4" />
+                </PrimaryButton>
               </form>
+
+              <div className="mt-4 text-center">
+                <button
+                  onClick={() => { setUseOtpFlow(true); setError(""); }}
+                  className="text-xs text-muted-foreground hover:text-foreground underline underline-offset-2"
+                >
+                  Use email code instead
+                </button>
+              </div>
 
               <div className="mt-4 p-3 rounded-lg bg-muted/50 flex items-start gap-2 text-xs text-muted-foreground">
                 <ShieldCheck className="w-4 h-4 text-green-500 shrink-0 mt-0.5" />
                 <span>Your identity stays private. We generate an anonymous username for you.</span>
               </div>
             </>
-          ) : (
-            <>
-              <button
-                onClick={() => { setStep("identifier"); setError(""); setOtp(["", "", "", "", "", ""]); }}
-                className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors mb-5"
-              >
-                <ChevronLeft className="w-4 h-4" /> Back
-              </button>
-
-              <div className="mb-5">
-                <h2 className="font-display font-semibold text-lg">Check your email</h2>
-                <p className="text-sm text-muted-foreground mt-0.5">
-                  We sent a 6-digit code to{" "}
-                  <span className="font-medium text-foreground">{identifier}</span>
-                </p>
-              </div>
-
-              <form onSubmit={handleVerifyOTP} className="space-y-4">
-                {/* OTP inputs */}
-                <div className="flex gap-2 justify-center">
-                  {otp.map((digit, i) => (
-                    <input
-                      key={i}
-                      id={`otp-${i}`}
-                      type="text"
-                      inputMode="numeric"
-                      value={digit}
-                      onChange={(e) => handleOTPInput(i, e.target.value)}
-                      onKeyDown={(e) => handleOTPKeyDown(i, e)}
-                      onPaste={(e) => {
-                        e.preventDefault();
-                        handleOTPInput(i, e.clipboardData.getData("text"));
-                      }}
-                      maxLength={6}
-                      className={cn(
-                        "w-11 h-12 text-center text-lg font-bold rounded-lg border bg-muted",
-                        "focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent",
-                        "transition-all",
-                        digit ? "border-whisper-500/50 bg-whisper-500/5" : "border-border"
-                      )}
-                      autoFocus={i === 0}
-                    />
-                  ))}
-                </div>
-
-                {error && (
-                  <div className="text-xs text-destructive bg-destructive/10 border border-destructive/20 rounded-lg px-3 py-2 text-center">
-                    {error}
-                  </div>
-                )}
-
-                <button
-                  type="submit"
-                  disabled={loading || otp.join("").length < 6}
-                  className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg font-semibold text-sm bg-whisper-500 hover:bg-whisper-600 text-white transition-colors disabled:opacity-50"
-                >
-                  {loading ? <RefreshCw className="w-4 h-4 animate-spin" /> : "Verify & Sign In"}
-                </button>
-              </form>
-
-              <div className="mt-4 text-center">
-                <button
-                  onClick={handleResend}
-                  disabled={resendCooldown > 0 || loading}
-                  className="text-xs text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
-                >
-                  {resendCooldown > 0
-                    ? `Resend in ${resendCooldown}s`
-                    : "Didn't receive it? Resend code"}
-                </button>
-              </div>
-            </>
           )}
         </div>
 
         <p className="text-center text-xs text-muted-foreground mt-6">
-          By signing in, you agree to our{" "}
+          By continuing, you agree to our{" "}
           <a href="/terms" className="hover:text-foreground transition-colors underline underline-offset-2">Terms</a>
           {" "}and{" "}
           <a href="/privacy" className="hover:text-foreground transition-colors underline underline-offset-2">Privacy Policy</a>
         </p>
       </div>
     </div>
+  );
+}
+
+function Input({
+  icon,
+  rightAdornment,
+  value,
+  onChange,
+  ...rest
+}: {
+  icon: React.ReactNode;
+  rightAdornment?: React.ReactNode;
+  value: string;
+  onChange: (v: string) => void;
+} & Omit<React.InputHTMLAttributes<HTMLInputElement>, "onChange" | "value">) {
+  return (
+    <div className="relative">
+      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">{icon}</span>
+      <input
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        required
+        className={cn(
+          "w-full pl-9 pr-9 py-2.5 text-sm bg-muted border border-border rounded-lg",
+          "focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent",
+          rightAdornment ? "pr-10" : "pr-4"
+        )}
+        {...rest}
+      />
+      {rightAdornment && (
+        <span className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center">{rightAdornment}</span>
+      )}
+    </div>
+  );
+}
+
+function ErrorBox({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="text-xs text-destructive bg-destructive/10 border border-destructive/20 rounded-lg px-3 py-2">
+      {children}
+    </div>
+  );
+}
+
+function PrimaryButton({
+  loading,
+  disabled,
+  children,
+}: {
+  loading?: boolean;
+  disabled?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="submit"
+      disabled={loading || disabled}
+      className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg font-semibold text-sm bg-whisper-500 hover:bg-whisper-600 text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+    >
+      {loading ? <RefreshCw className="w-4 h-4 animate-spin" /> : children}
+    </button>
+  );
+}
+
+function GoogleIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden>
+      <path fill="#4285F4" d="M17.64 9.205c0-.639-.057-1.252-.164-1.841H9v3.481h4.844a4.14 4.14 0 0 1-1.796 2.716v2.258h2.908c1.702-1.567 2.684-3.875 2.684-6.614z"/>
+      <path fill="#34A853" d="M9 18c2.43 0 4.467-.806 5.956-2.18l-2.908-2.259c-.806.54-1.836.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 0 0 9 18z"/>
+      <path fill="#FBBC05" d="M3.964 10.71A5.41 5.41 0 0 1 3.682 9c0-.593.102-1.17.282-1.71V4.958H.957A8.997 8.997 0 0 0 0 9c0 1.452.348 2.827.957 4.042l3.007-2.332z"/>
+      <path fill="#EA4335" d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 0 0 .957 4.958L3.964 7.29C4.672 5.163 6.656 3.58 9 3.58z"/>
+    </svg>
   );
 }
