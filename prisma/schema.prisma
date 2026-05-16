@@ -1,0 +1,169 @@
+// prisma/schema.prisma
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String    @id @default(cuid())
+  username     String    @unique
+  email        String?   @unique
+  phone        String?   @unique
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  isBanned     Boolean   @default(false)
+  karma        Int       @default(0)
+
+  posts        Post[]
+  comments     Comment[]
+  votes        Vote[]
+  sessions     Session[]
+  otpTokens    OtpToken[]
+  memberships  BowlMembership[]
+
+  @@map("users")
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+}
+
+model OtpToken {
+  id        String   @id @default(cuid())
+  token     String
+  identifier String  // email or phone
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  used      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@map("otp_tokens")
+}
+
+model Bowl {
+  id          String   @id @default(cuid())
+  name        String
+  slug        String   @unique
+  description String?
+  icon        String?  @default("🏢")
+  isDefault   Boolean  @default(false)
+  memberCount Int      @default(0)
+  createdAt   DateTime @default(now())
+
+  posts       Post[]
+  memberships BowlMembership[]
+
+  @@map("bowls")
+}
+
+model BowlMembership {
+  id        String   @id @default(cuid())
+  userId    String
+  bowlId    String
+  joinedAt  DateTime @default(now())
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  bowl      Bowl     @relation(fields: [bowlId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, bowlId])
+  @@map("bowl_memberships")
+}
+
+model Post {
+  id          String      @id @default(cuid())
+  content     String
+  title       String?
+  type        PostType    @default(NORMAL)
+  userId      String
+  bowlId      String
+  score       Int         @default(0)
+  viewCount   Int         @default(0)
+  isFlagged   Boolean     @default(false)
+  flagReason  String?
+  isDeleted   Boolean     @default(false)
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  // Salary fields (only when type = SALARY)
+  company     String?
+  role        String?
+  level       String?     // Fresher | Junior | Mid | Senior | Lead | Staff | Principal | Manager | Director | VP
+  experience  Int?        // years
+  baseSalary  Int?        // in LPA (Lakh Per Annum)
+  totalComp   Int?        // total including bonus/stock
+  bonus       Int?        // annual bonus LPA
+  stock       Int?        // annual stock LPA
+  location    String?
+  country     String?     // e.g. "India", "United States", "United Kingdom"
+  currency    String?     // ISO 4217 — INR | USD | EUR | GBP | SGD | AUD | CAD | AED | JPY | BRL | CHF | SEK
+  workArrangement String? // Remote | Hybrid | Onsite
+  gender      String?     // Male | Female | Other | PreferNotToSay
+  skills      String[]
+
+  @@index([type, company])
+  @@index([type, location])
+  @@index([type, country])
+  @@index([type, role])
+  @@index([type, level])
+
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  bowl        Bowl        @relation(fields: [bowlId], references: [id], onDelete: Cascade)
+  comments    Comment[]
+  votes       Vote[]
+
+  @@map("posts")
+}
+
+model Comment {
+  id          String    @id @default(cuid())
+  content     String
+  postId      String
+  userId      String
+  parentId    String?
+  score       Int       @default(0)
+  isFlagged   Boolean   @default(false)
+  isDeleted   Boolean   @default(false)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  post        Post      @relation(fields: [postId], references: [id], onDelete: Cascade)
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  parent      Comment?  @relation("CommentReplies", fields: [parentId], references: [id])
+  replies     Comment[] @relation("CommentReplies")
+
+  @@map("comments")
+}
+
+model Vote {
+  id        String   @id @default(cuid())
+  userId    String
+  postId    String?
+  commentId String?
+  value     Int      // +1 or -1
+  createdAt DateTime @default(now())
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  post      Post?    @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, postId])
+  @@unique([userId, commentId])
+  @@map("votes")
+}
+
+enum PostType {
+  NORMAL
+  SALARY
+  QUESTION
+  REVIEW
+}

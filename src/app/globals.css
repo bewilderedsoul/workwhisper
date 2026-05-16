@@ -1,0 +1,156 @@
+/* src/app/globals.css */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 240 10% 3.9%;
+    --card: 0 0% 100%;
+    --card-foreground: 240 10% 3.9%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 240 10% 3.9%;
+    --primary: 280 85% 60%;
+    --primary-foreground: 0 0% 98%;
+    --secondary: 240 4.8% 95.9%;
+    --secondary-foreground: 240 5.9% 10%;
+    --muted: 240 4.8% 95.9%;
+    --muted-foreground: 240 3.8% 46.1%;
+    --accent: 240 4.8% 95.9%;
+    --accent-foreground: 240 5.9% 10%;
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 240 5.9% 90%;
+    --input: 240 5.9% 90%;
+    --ring: 280 85% 60%;
+    --radius: 0.75rem;
+  }
+
+  .dark {
+    --background: 240 10% 3.9%;
+    --foreground: 0 0% 98%;
+    --card: 240 10% 5.5%;
+    --card-foreground: 0 0% 98%;
+    --popover: 240 10% 5.5%;
+    --popover-foreground: 0 0% 98%;
+    --primary: 280 85% 65%;
+    --primary-foreground: 240 10% 3.9%;
+    --secondary: 240 3.7% 12%;
+    --secondary-foreground: 0 0% 98%;
+    --muted: 240 3.7% 12%;
+    --muted-foreground: 240 5% 58%;
+    --accent: 240 3.7% 14%;
+    --accent-foreground: 0 0% 98%;
+    --destructive: 0 62.8% 50.6%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 240 3.7% 12%;
+    --input: 240 3.7% 12%;
+    --ring: 280 85% 65%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    font-feature-settings: "rlig" 1, "calt" 1;
+  }
+
+  h1, h2, h3, h4 {
+    font-family: var(--font-syne), sans-serif;
+  }
+
+  ::selection {
+    @apply bg-whisper-500/20 text-whisper-900 dark:text-whisper-100;
+  }
+
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  ::-webkit-scrollbar-track {
+    @apply bg-transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    @apply bg-border rounded-full;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-muted-foreground/40;
+  }
+}
+
+@layer components {
+  .whisper-card {
+    @apply bg-card border border-border rounded-xl transition-all duration-200;
+  }
+
+  .whisper-card-hover {
+    @apply whisper-card hover:border-whisper-500/30 hover:shadow-lg hover:shadow-whisper-500/5;
+  }
+
+  .salary-badge {
+    @apply inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold;
+    background: linear-gradient(135deg, #c445ed15, #ff6f0f15);
+    border: 1px solid #c445ed30;
+    color: #c445ed;
+  }
+
+  .dark .salary-badge {
+    background: linear-gradient(135deg, #c445ed20, #ff6f0f20);
+    border-color: #c445ed40;
+    color: #d872f8;
+  }
+
+  .gradient-text {
+    background: linear-gradient(135deg, #c445ed, #ff6f0f);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .vote-btn {
+    @apply flex items-center justify-center w-8 h-8 rounded-lg transition-all duration-150;
+    @apply text-muted-foreground hover:text-foreground hover:bg-muted;
+  }
+
+  .vote-btn.upvoted {
+    @apply text-whisper-500 bg-whisper-500/10 hover:bg-whisper-500/15;
+  }
+
+  .vote-btn.downvoted {
+    @apply text-destructive bg-destructive/10 hover:bg-destructive/15;
+  }
+
+  .shimmer {
+    @apply relative overflow-hidden;
+  }
+
+  .shimmer::after {
+    content: "";
+    @apply absolute inset-0;
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,0.06), transparent);
+    animation: shimmer 2s infinite;
+  }
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+
+  .animate-in {
+    animation: fade-in 0.3s ease-out both;
+  }
+
+  .stagger-1 { animation-delay: 50ms; }
+  .stagger-2 { animation-delay: 100ms; }
+  .stagger-3 { animation-delay: 150ms; }
+  .stagger-4 { animation-delay: 200ms; }
+}
