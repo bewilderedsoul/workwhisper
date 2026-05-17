@@ -54,6 +54,9 @@ export const metadata: Metadata = {
     description: "Anonymous salary & workplace discussions for Indian professionals.",
   },
   robots: { index: true, follow: true },
+  verification: {
+    google: "B7_xXzO_b41rK1GH8cRr64knGrnAoRGtFidkvMgiHXU",
+  },
 };
 
 export default function RootLayout({
